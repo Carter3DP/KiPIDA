@@ -206,6 +206,68 @@ class RemediationTests(DcAdvisorTestBase):
         self.assertFalse(estimated[0].verified)
         self.assertIn("estimate", estimated[0].predicted_gain)
 
+    def test_widening_never_narrows_a_segment_already_wide_enough(self):
+        """A mixed-width layer must not be levelled down to the proposal.
+
+        The sizing takes the *narrowest* segment as the one governing the drop,
+        but the what-if predicate matched every segment on the layer and
+        _board_with_widths sets each match to exactly the proposed width. On a
+        layer carrying a mix -- which is what real boards carry; on the
+        reference board every rail with this finding had one -- the wide
+        segments were narrowed to the proposal, and the advice made the rail
+        worse. Measured on +3V3_MAIN: 1.4972 mV before, 2.9083 mV after taking
+        it, against a promise of 1.0000 mV.
+
+        Every fixture in this file had one width per layer, which is why 838
+        tests went green over it.
+        """
+        from advisor.dc_advisor import (
+            build_dc_remediations, build_net_mesh, find_node_at,
+            simulate_width_change,
+        )
+        from ingest.board_reader import Segment
+
+        # A long wide feeder into a short narrow spur. The proportions matter:
+        # with the wide copper carrying most of the length, levelling it down
+        # to the proposal costs more than widening the spur gains, so the old
+        # predicate does not merely under-deliver -- it makes the drop worse.
+        # A fixture where the two roughly cancel would pass either way.
+        board = _make_board_one_track(length_mm=10.0)
+        board.segments = [
+            Segment("VCC", 2.0, "F.Cu", (0.0, 0.0), (9.0, 0.0)),
+            Segment("VCC", 0.2, "F.Cu", (9.0, 0.0), (10.0, 0.0)),
+        ]
+        mesh = build_net_mesh(board, "VCC")
+        sources = [{"node_id": find_node_at(mesh, 0.0, 0.0), "voltage": 5.0}]
+        loads = [{"node_id": find_node_at(mesh, 10.0, 0.0), "current": 2.0}]
+
+        advice = build_dc_remediations(
+            board, "VCC", "", sources, loads, target_drop_v=0.005, verify=False,
+        )
+        self.assertEqual(advice[0].action, "WIDEN_TRACK")
+        proposed = advice[0].proposed_value
+        self.assertLess(proposed, 2.0, "fixture must leave one segment wide enough")
+        # The finding must name the segments it would actually touch.
+        self.assertIn("1 of 2 segment(s)", advice[0].target)
+
+        def _resimulate(predicate):
+            return simulate_width_change(
+                board, "VCC", "", sources, loads, predicate, proposed,
+            )
+
+        kept = _resimulate(lambda seg: (
+            seg.net_name == "VCC" and seg.layer == "F.Cu"
+            and 0 < seg.width_mm < proposed
+        ))
+        levelled = _resimulate(lambda seg: (
+            seg.net_name == "VCC" and seg.layer == "F.Cu" and seg.width_mm > 0
+        ))
+        self.assertTrue(kept.converged and levelled.converged)
+        self.assertLess(kept.resimulated_drop_v, kept.baseline_drop_v)
+        # The defect, stated as the test that catches it: levelling the layer
+        # raises the drop it was asked to lower.
+        self.assertGreater(levelled.resimulated_drop_v, levelled.baseline_drop_v)
+
     def test_drop_already_within_target_produces_no_advice(self):
         from advisor.dc_advisor import build_dc_remediations
         solved = _SolvedTrack(current_a=1.0)

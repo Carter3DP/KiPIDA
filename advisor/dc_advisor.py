@@ -935,8 +935,21 @@ def build_dc_remediations(
                 "Move the load closer to the regulator",
             ]
 
-        def _predicate(seg, _layer=layer, _net=net_name):
-            return seg.net_name == _net and seg.layer == _layer and seg.width_mm > 0
+        # Only the segments actually narrower than the proposal. The predicate
+        # used to match every segment on the layer, and _board_with_widths sets
+        # each match to exactly the proposed width -- so on a layer carrying a
+        # mix of widths, which is the normal case, the "widen this track"
+        # action *narrowed* every segment already wider than the proposal. On
+        # +5V_RAIL that was 30 of 44 segments, and on +3V3_MAIN the re-solved
+        # drop rose from 1.4972 mV to 2.9083 mV: the advice made the rail
+        # worse, and the fast path still printed the target as the gain.
+        widen = [seg for seg in layer_segments if seg.width_mm < proposed_width]
+
+        def _predicate(seg, _layer=layer, _net=net_name, _to=proposed_width):
+            return (
+                seg.net_name == _net and seg.layer == _layer
+                and 0 < seg.width_mm < _to
+            )
 
         if verify:
             outcome = simulate_width_change(
@@ -970,7 +983,11 @@ def build_dc_remediations(
 
         remediations.append(Remediation(
             action="WIDEN_TRACK",
-            target=f"{net_name} / {layer} / {len(layer_segments)} segment(s)",
+            target=(
+                f"{net_name} / {layer} / {len(widen)} of "
+                f"{len(layer_segments)} segment(s) narrower than "
+                f"{proposed_width:.4g} mm"
+            ),
             current_value=current_width,
             proposed_value=proposed_width,
             unit="mm",
