@@ -45,15 +45,22 @@ Working constraints for this project:
     on a five-millimetre synthetic pour, exactly and in the right proportions,
     because the defect was in the mesher and not in that board. A3 needed no
     board at all: its blocker was two recorded claims that the actions had no
-    re-simulable form, and both were wrong. What still needs the reference
-    board is confirming the predicted numbers on it, which is a smaller and
-    much better-defined job than "work the item". Read a "needs the board"
-    note as a question about which half is which.
+    re-simulable form, and both were wrong.
+
+    Both have since been run on the reference board, and the correction is
+    worth more than either item. A4 confirmed cleanly and turned out to have
+    been ranked too high -- it changed no number on that board. A3 did not
+    confirm at all: it found that neither action it had just verified could
+    fire there, and that the third action was actively harmful. The board's
+    value was not confirming predictions. It was carrying two properties no
+    synthetic fixture had -- layers with a mix of track widths, and a dominant
+    path that always contains at least one track branch -- and each of those
+    broke a code path that eight hundred green tests agreed was fine. Read a
+    "needs the board" note as asking which properties the fixtures do not have.
 * The reference board lives on the author's Windows machine, at
   `C:\Users\jbc66\Documents\DAW CONTROLEUR\schema\DAW-Controlleur\boards\p02_alimentation`.
   Nothing in that directory may be modified, created or deleted, and it is not
-  reachable from a cloud session -- so A3 and A4 are local-session work, and
-  everything else is not.
+  reachable from a cloud session.
 
 The reflex this session most needed, learned the hard way: when a fix produces
 no visible change, look for a second copy of the value before doubting the
@@ -65,6 +72,13 @@ like any other, and it decays. Both what-ifs carried a careful, well-argued
 paragraph explaining why they could not be re-simulated. Both were wrong, and
 they had gone unchallenged precisely because they were well argued and written
 by someone who had looked. Re-derive the objection before inheriting it.
+
+And a third, from the session that ran the two on the board: a regression test
+whose fixture does not reproduce the harm proves nothing, however exactly it
+names the defect. The first test written for the narrowing bug passed against
+the broken code, because on that fixture narrowing the wide segment happened to
+cost less than widening the narrow one gained. The fix looked covered. Run a
+new test against the old code before believing it.
 
 
 
@@ -104,8 +118,8 @@ the cap is too low for buoyant cases or the energy residual needs its own
 normalisation. Measure which before changing either -- the last three
 iteration-count changes were all invisible for a different reason each time.
 
-**A3. Advisor actions are unverified except for track width. Done -- both now
-re-simulate, and the check disagreed with the estimate.**
+**A3. Advisor actions are unverified except for track width. Done -- and the
+one exempted by that title was the one reporting something untrue.**
 Each action had an objection recorded against it, and each objection had an
 answer.
 
@@ -151,12 +165,90 @@ assumed away. Both actions still help; they just do not arrive where they said.
 `verify=False` keeps the old wording and `verified=False`, so the fast path
 never presents an estimate as a measurement.
 
-Not yet run on the reference board: `validation/advisor_on_board.py` now
-defaults to `verify=True` and takes `--fast` for the old path, so the two can
-be compared on real copper by running it twice. The number to look for is the
-same one the table shows: how far the re-simulated drop lands above the
-promise on a 108,000-node plane, where the spreading resistance the estimate
-ignores is far larger than on any synthetic board.
+Run on the reference board, which changed the item rather than confirming it.
+Neither action could be exercised there at all, and the reason was in the
+third action.
+
+`build_dc_remediations` reached the via and pour actions only when the dominant
+path held *no* track branch. Every rail on p02_alimentation has at least one:
++3V3AO has two carrying 0.0 % of the loss against a pour carrying 100.0 %, and
++5V_RAIL has eleven carrying 3.3 % against a pour carrying 94.5 %. So
+`_plane_copper_actions`, which names +5V_RAIL in its own docstring as the case
+it was written for, could not fire on +5V_RAIL -- or on anything else.
+
+Two defects in WIDEN_TRACK came out of trying, both first order, both in the
+action this item's title called already verified.
+
+* The what-if predicate matched every segment on the layer, and
+  `_board_with_widths` sets each match to exactly the proposed width -- so
+  segments already wider than the proposal were **narrowed** to it.
+  Re-simulating the advice as the code applies it moved +3V3_MAIN from
+  1.4972 mV to 2.9083 mV: the advice made the rail twice as bad, and the fast
+  path printed the target as the gain. Mixed-width layers are the normal case,
+  not the corner: +5V_RAIL/B.Cu runs 0.5 to 1.25 mm and 30 of its 44 segments
+  would have been narrowed; VBUS_PD_SW/F.Cu runs 0.25 to 3.0 mm. Every fixture
+  in `tests/test_dc_advisor.py` had one width per layer, which is how 838 tests
+  stayed green over it.
+* It sized against the *whole* rail drop -- `w' = w x (drop / target)` -- which
+  assumes every volt lost is lost on those tracks. That is also why the gate
+  above had to be all-or-nothing: an action with no notion of how much of the
+  drop it can reach has no way to decline, so the only way to let another
+  action speak was to suppress this one entirely.
+
+Both fixed. WIDEN_TRACK now attributes by power share and declines when its
+share cannot cover the excess, as the other two already did, and the other two
+are consulted whenever widening produces nothing. On +5V_RAIL the advisor now
+declines the tracks (0.216 mV of 6.558 mV), declines the vias (0.013 mV), and
+proposes the In2.Cu pour instead. That is the first time either of these two
+actions has run on this board.
+
+The table this item exists for, now on real copper rather than on a synthetic
+two-pour board:
+
+The last column is the one the old note asked for -- how far the re-simulated
+drop lands from the promise, as `(re-simulated - promise) / promise`. It is
+*not* the statistic the synthetic table above reports: that one is the code's
+own `prediction_error_pct`, which divides by the re-simulated drop instead. The
+two are not comparable digit for digit, only in direction and rough size.
+
+| rail | target | action | promise | re-simulated | vs promise |
+| --- | --- | --- | --- | --- | --- |
+| +3V3_MAIN | 1.400 mV | widen F.Cu 0.25 -> 0.2997 mm | 1.400 mV | 1.497 mV | +6.9 % |
+| +3V3_MAIN | 1.200 mV | widen F.Cu 0.25 -> 0.5069 mm | 1.200 mV | 1.497 mV | +24.7 % |
+| +3V3_MAIN | 1.000 mV | widen F.Cu 0.25 -> 1.6428 mm | 1.000 mV | 1.456 mV | +45.6 % |
+| +3V3_MAIN | 0.800 mV | In3.Cu 0.437 -> 3 oz | 0.800 mV | 0.668 mV | -16.5 % |
+| +3V3_MAIN | 0.600 mV | none: no lever reaches it | -- | -- | -- |
+| +5V_RAIL | 5.500 mV | In2.Cu 0.437 -> 1 oz | 5.500 mV | 3.011 mV | -45.3 % |
+| +5V_RAIL | 5.000 mV | In2.Cu 0.437 -> 1 oz | 5.000 mV | 3.011 mV | -39.8 % |
+| +5V_RAIL | 4.500 mV | In2.Cu 0.437 -> 1 oz | 4.500 mV | 3.011 mV | -33.1 % |
+| +5V_RAIL | 4.000 mV | In2.Cu 0.437 -> 1 oz | 4.000 mV | 3.011 mV | -24.7 % |
+| +5V_RAIL | 3.000 mV | In2.Cu 0.437 -> 2 oz | 3.000 mV | 1.616 mV | -46.1 % |
+
+Three things in there that the synthetic board could not show.
+
+The widening rows over-promise, and worse the more they are asked for, which
+is the known shape. But the top two do not move the drop *at all* -- 1.497 mV
+before and after -- while the estimate promises a 7 % and a 20 % cut. A first
+-order estimate being optimistic is expected; being wrong about whether
+anything happens is not.
+
+The pour rows err the other way and under-promise, for a reason that is not
+approximation error: the required weight is snapped up to one a fabricator
+will quote. So the two actions' errors have opposite signs and unrelated
+causes, and only re-simulation tells them apart.
+
+And the four +5V_RAIL rows at 1 oz are the argument for this item in one
+place: four different targets, one identical fix, one identical outcome of
+3.011 mV, and four different promises. The fast path's number tracks what was
+asked for rather than what the copper does. "It says it is first order" does
+not cover that -- a reader has no way to tell that ~5.5 mV and ~4.0 mV are the
+same board.
+
+Still open, and the honest limit of what was checked: the promise graded here
+is the caller's *target*, so an action that declines is never graded at all.
+Whether declining was right on a given rail -- whether some combination of the
+three would have reached the target -- is not something this advisor can
+answer, because it sizes one lever at a time.
 
 **A4. 900 single-node components in the advisor's mesh. Done -- the lattice
 now follows the copper.**

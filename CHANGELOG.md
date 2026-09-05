@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- Fixed the DC advisor's `WIDEN_TRACK` action narrowing copper: the what-if
+  applied the proposed width to every segment on the layer, so on a layer with
+  a mix of widths -- the normal case -- segments already wider were reduced to
+  the proposal. Re-simulated on the reference board, taking the advice moved
+  one rail's drop from 1.4972 mV to 2.9083 mV. Only the segments narrower than
+  the proposal are changed now, and the finding names them.
+- Fixed the DC advisor sizing `WIDEN_TRACK` against the whole rail drop rather
+  than the share the layer's tracks carry, which promised targets the copper
+  could not reach at any width. Each action is now sized against the drop it
+  can actually reach and declines when that share cannot cover the excess.
+- Fixed `ADD_STITCHING_VIAS` and `INCREASE_COPPER_WEIGHT` being unreachable
+  whenever any track branch appeared on the dominant path -- which on real
+  boards is always. They are consulted whenever widening cannot reach the
+  target.
+- Changed the advisor's predicted-gain wording to report drops in millivolts
+  with four significant figures; volts to three decimals rounded whole
+  millivolt-scale rails to a single indistinguishable digit.
 - Changed the analysis batch to run through `CampaignEngine` instead of
   chaining the per-domain buttons: one cancellable background run that keeps
   the domains already finished, per-domain failure isolation, and one
