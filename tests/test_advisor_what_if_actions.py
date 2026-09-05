@@ -116,6 +116,51 @@ class WhatIfActionsAreResimulated(unittest.TestCase):
         # The undercut caveat survives verification: it is not what was checked.
         self.assertIn("undercut", checked[0].predicted_gain)
 
+    def test_a_track_on_the_dominant_path_does_not_veto_the_pour_action(self):
+        """One track branch used to suppress both of the other two actions.
+
+        The dispatch reached the via and copper-weight actions only when the
+        dominant path held *no* track branch at all. On the reference board
+        that gate never opened: every rail there has at least one, and +3V3AO
+        has two carrying 0.0 % of the loss against a pour carrying 100 %. So
+        INCREASE_COPPER_WEIGHT -- whose own docstring names +5V_RAIL as the
+        case it was written for -- could not fire on +5V_RAIL.
+
+        Each action is now sized against the share of the drop it can actually
+        reach, and declines when that share cannot cover the excess, so a track
+        carrying a minority of the loss steps aside instead of vetoing.
+        """
+        from advisor.dc_advisor import (
+            build_dc_remediations, build_net_mesh, dominant_path_share,
+            find_node_at, load_drop_v, rank_branch_losses,
+        )
+        from ingest.board_reader import Segment
+        from solver import Solver
+
+        board = _board(copper_mm=0.035, via_count=8, drill_mm=0.8)
+        # A wide stub feeding the pour: it is on the dominant path, and it
+        # carries far too little of the loss to reach the target on its own.
+        board.segments = [Segment("VCC", 3.0, "F.Cu", (1.5, 2.0), (2.0, 2.0))]
+        mesh = build_net_mesh(board, "VCC", "", grid_step_mm=_STEP)
+        sources = [{"node_id": find_node_at(mesh, 1.5, 2.0, 0), "voltage": 5.0}]
+        loads = [{"node_id": find_node_at(mesh, 8.0, 8.0, 2), "current": 3.0}]
+
+        dominant = dominant_path_share(
+            rank_branch_losses(mesh, Solver().solve(mesh, sources, loads))
+        )
+        self.assertTrue(
+            any(loss.geometry_source.startswith("seg:") for loss in dominant),
+            "fixture must put a track on the dominant path, or it proves nothing",
+        )
+
+        baseline = load_drop_v(Solver().solve(mesh, sources, loads), sources, loads)
+        advice = build_dc_remediations(
+            board, "VCC", "", sources, loads,
+            target_drop_v=baseline * 0.8, verify=False, grid_step_mm=_STEP,
+        )
+        self.assertTrue(advice)
+        self.assertEqual(advice[0].action, "INCREASE_COPPER_WEIGHT")
+
     def test_the_first_order_sizing_over_promises(self):
         # This is what the item was for. Both sizings attribute the drop in
         # proportion to dissipated power and scale that share down, which

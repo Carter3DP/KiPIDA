@@ -553,6 +553,22 @@ def _effort_for_ratio(ratio: float) -> RemediationEffort:
     return RemediationEffort.HIGH
 
 
+def _format_drop(volts: float) -> str:
+    """A drop, at a resolution that can still tell two of them apart.
+
+    The gain strings quoted volts to three or four decimal places. A board
+    whose rails drop millivolts -- which is every board this has been run on --
+    collapses to one digit there, and the verified gain for +3V3_MAIN read
+    "drop 0.001 V -> 0.001 V" for a re-simulated 1.4972 mV landing at 1.4564 mV
+    against a promised 1.0000 mV. All three round to 0.001. Reporting a
+    measurement at a precision that cannot distinguish it from the thing it
+    disagrees with wastes the measurement.
+    """
+    if abs(volts) < 0.1:
+        return f"{volts * 1000.0:.4g} mV"
+    return f"{volts:.4g} V"
+
+
 def _layer_of(geometry_source: str) -> str:
     """``"seg:F.Cu"`` -> ``"F.Cu"``; empty for via/zone/unknown sources."""
     if geometry_source.startswith("seg:"):
@@ -617,16 +633,17 @@ def _stitching_via_actions(
         via_drop = baseline_drop * (power / total_power)
         if via_drop <= excess:
             log(
-                f"Vias {pair} on '{net_name}' carry {via_drop:.3f} V of the "
-                f"{baseline_drop:.3f} V drop, less than the {excess:.3f} V that "
-                "must be removed; adding vias alone cannot reach the target."
+                f"Vias {pair} on '{net_name}' carry {_format_drop(via_drop)} of "
+                f"the {_format_drop(baseline_drop)} drop, less than the "
+                f"{_format_drop(excess)} that must be removed; adding vias "
+                "alone cannot reach the target."
             )
             continue
         factor = via_drop / (via_drop - excess)
         count = len([loss for loss in dominant if _via_pair_of(loss.geometry_source) == pair])
         proposed = max(count + 1, int(math.ceil(count * factor)))
         gain = (
-            f"drop {baseline_drop:.3f} V -> ~{target_drop_v:.3f} V "
+            f"drop {_format_drop(baseline_drop)} -> ~{_format_drop(target_drop_v)} "
             "(first-order, parallel-resistance estimate, not re-simulated)"
         )
         verified = False
@@ -634,8 +651,8 @@ def _stitching_via_actions(
             outcome = resimulate(pair, proposed - count, target_drop_v)
             if outcome is not None and outcome.converged:
                 gain = (
-                    f"drop {outcome.baseline_drop_v:.3f} V -> "
-                    f"{outcome.resimulated_drop_v:.3f} V (re-simulated with the "
+                    f"drop {_format_drop(outcome.baseline_drop_v)} -> "
+                    f"{_format_drop(outcome.resimulated_drop_v)} (re-simulated with the "
                     f"added vias beside the existing ones, so the pour's "
                     f"spreading resistance is unrelieved and this is a lower "
                     f"bound on the gain)"
@@ -746,9 +763,10 @@ def _plane_copper_actions(
         zone_drop = baseline_drop * (power / total_power)
         if zone_drop <= excess:
             log(
-                f"Pour on {layer} carries {zone_drop:.4f} V of the "
-                f"{baseline_drop:.4f} V drop, less than the {excess:.4f} V that "
-                "must be removed; thicker copper alone cannot reach the target."
+                f"Pour on {layer} carries {_format_drop(zone_drop)} of the "
+                f"{_format_drop(baseline_drop)} drop, less than the "
+                f"{_format_drop(excess)} that must be removed; thicker copper "
+                "alone cannot reach the target."
             )
             continue
         factor = zone_drop / (zone_drop - excess)
@@ -770,7 +788,7 @@ def _plane_copper_actions(
             )
             continue
         gain = (
-            f"drop {baseline_drop:.4f} V -> ~{target_drop_v:.4f} V "
+            f"drop {_format_drop(baseline_drop)} -> ~{_format_drop(target_drop_v)} "
             "(first-order, sheet-resistance estimate, not re-simulated)"
         )
         verified = False
@@ -778,8 +796,8 @@ def _plane_copper_actions(
             outcome = resimulate(layer, quotable * OUNCE_MM, target_drop_v)
             if outcome is not None and outcome.converged:
                 gain = (
-                    f"drop {outcome.baseline_drop_v:.4f} V -> "
-                    f"{outcome.resimulated_drop_v:.4f} V (re-simulated; excludes "
+                    f"drop {_format_drop(outcome.baseline_drop_v)} -> "
+                    f"{_format_drop(outcome.resimulated_drop_v)} (re-simulated; excludes "
                     f"the etch undercut heavier copper adds to tracks on {layer})"
                 )
                 verified = True
@@ -851,8 +869,8 @@ def build_dc_remediations(
     baseline_drop = load_drop_v(node_voltages, sources, loads)
     if baseline_drop <= target_drop_v:
         _log(
-            f"Net '{net_name}' drop {baseline_drop:.4f} V already meets the "
-            f"{target_drop_v:.4f} V target; no advice produced."
+            f"Net '{net_name}' drop {_format_drop(baseline_drop)} already meets "
+            f"the {_format_drop(target_drop_v)} target; no advice produced."
         )
         return []
 
@@ -867,48 +885,44 @@ def build_dc_remediations(
         layer = _layer_of(loss.geometry_source)
         if layer:
             power_by_layer[layer] = power_by_layer.get(layer, 0.0) + loss.power_w
-    if not power_by_layer:
-        # These two used to be first-order only, on the grounds that neither
-        # had a re-simulable form. Both now do, and `verify` gates them exactly
-        # as it gates the track-width what-if -- so the fast path is still fast
-        # and still labels its numbers as estimates.
-        def _resimulate_vias(pair, extra_vias, predicted):
-            return simulate_via_addition(
-                parsed_board, net_name, ground_net_name, sources, loads,
-                pair, extra_vias, predicted_drop_v=predicted,
-                grid_step_mm=grid_step_mm, solver=solver,
-                log_callback=log_callback,
-            )
+    # These two used to be first-order only, on the grounds that neither had a
+    # re-simulable form. Both now do, and `verify` gates them exactly as it
+    # gates the track-width what-if -- so the fast path is still fast and still
+    # labels its numbers as estimates.
+    def _resimulate_vias(pair, extra_vias, predicted):
+        return simulate_via_addition(
+            parsed_board, net_name, ground_net_name, sources, loads,
+            pair, extra_vias, predicted_drop_v=predicted,
+            grid_step_mm=grid_step_mm, solver=solver,
+            log_callback=log_callback,
+        )
 
-        def _resimulate_copper(layer, thickness_mm, predicted):
-            return simulate_copper_weight_change(
-                parsed_board, net_name, ground_net_name, sources, loads,
-                layer, thickness_mm, predicted_drop_v=predicted,
-                grid_step_mm=grid_step_mm, solver=solver,
-                log_callback=log_callback,
-            )
+    def _resimulate_copper(layer, thickness_mm, predicted):
+        return simulate_copper_weight_change(
+            parsed_board, net_name, ground_net_name, sources, loads,
+            layer, thickness_mm, predicted_drop_v=predicted,
+            grid_step_mm=grid_step_mm, solver=solver,
+            log_callback=log_callback,
+        )
 
+    def _actions_off_the_tracks() -> list[Remediation]:
+        """Vias, then plane copper: what is left when widening cannot do it."""
         via_actions = _stitching_via_actions(
             net_name, dominant, baseline_drop, target_drop_v, _log,
             resimulate=_resimulate_vias if verify else None,
         )
         if via_actions:
             return via_actions[:max_actions]
-        zone_actions = _plane_copper_actions(
+        return _plane_copper_actions(
             parsed_board, net_name, dominant, baseline_drop, target_drop_v, _log,
             resimulate=_resimulate_copper if verify else None,
-        )
-        if zone_actions:
-            return zone_actions[:max_actions]
-        _log(
-            f"Dominant loss on net '{net_name}' is not on track segments, not "
-            "concentrated in vias, and not on meshable zone copper either; no "
-            "action this advisor can size would help."
-        )
-        return []
+        )[:max_actions]
+
+    total_power = sum(loss.power_w for loss in dominant)
+    excess = baseline_drop - target_drop_v
 
     remediations: list[Remediation] = []
-    for layer, _power in sorted(
+    for layer, power in sorted(
         power_by_layer.items(), key=lambda kv: kv[1], reverse=True
     )[:max_actions]:
         layer_segments = [
@@ -917,11 +931,27 @@ def build_dc_remediations(
         ]
         if not layer_segments:
             continue
+        # Attribute the drop to this layer by its share of the dissipated
+        # power, as the via and pour actions already do, and size against that
+        # share rather than against the whole rail. Sizing against the whole
+        # rail assumes every volt lost is lost on these tracks: on +5V_RAIL the
+        # B.Cu tracks carry 3.3 % of the loss and the pour carries 94.5 %, and
+        # the advisor still promised to reach a 4.0 mV target by widening them
+        # -- a promise the copper cannot keep at any width.
+        track_drop = baseline_drop * (power / total_power) if total_power > 0 else 0.0
+        if track_drop <= excess:
+            _log(
+                f"Tracks on {layer} carry {_format_drop(track_drop)} of the "
+                f"{_format_drop(baseline_drop)} drop on '{net_name}', less than "
+                f"the {_format_drop(excess)} that must be removed; widening "
+                "them alone cannot reach the target."
+            )
+            continue
         # The narrowest segment governs the drop, so size against it.
         current_width = min(seg.width_mm for seg in layer_segments)
         try:
             proposed_width = required_width_for_target_drop(
-                current_width, baseline_drop, target_drop_v,
+                current_width, track_drop, track_drop - excess,
             )
         except ValueError as exc:
             _log(f"Cannot size layer {layer}: {exc}")
@@ -964,19 +994,19 @@ def build_dc_remediations(
                     "falling back to an unverified first-order estimate."
                 )
                 gain = (
-                    f"drop {baseline_drop:.3f} V -> ~{target_drop_v:.3f} V "
+                    f"drop {_format_drop(baseline_drop)} -> ~{_format_drop(target_drop_v)} "
                     "(first-order estimate, not re-simulated)"
                 )
                 verified = False
             else:
                 gain = (
-                    f"drop {outcome.baseline_drop_v:.3f} V -> "
-                    f"{outcome.resimulated_drop_v:.3f} V (re-simulated)"
+                    f"drop {_format_drop(outcome.baseline_drop_v)} -> "
+                    f"{_format_drop(outcome.resimulated_drop_v)} (re-simulated)"
                 )
                 verified = True
         else:
             gain = (
-                f"drop {baseline_drop:.3f} V -> ~{target_drop_v:.3f} V "
+                f"drop {_format_drop(baseline_drop)} -> ~{_format_drop(target_drop_v)} "
                 "(first-order estimate, not re-simulated)"
             )
             verified = False
@@ -998,4 +1028,24 @@ def build_dc_remediations(
             alternatives=alternatives,
         ))
 
-    return remediations
+    if remediations:
+        return remediations
+
+    # Widening produced nothing -- either the dominant loss never touched a
+    # track, or every track layer carries too little of the drop to reach the
+    # target on its own. Both mean the same thing: ask the other two actions.
+    # This used to be gated on the dominant path holding *no* track branch at
+    # all, and on the reference board that gate never opened. Every rail there
+    # has at least one track branch in its dominant path -- +3V3AO has two
+    # carrying 0.0 % of the loss against a pour carrying 100 % -- so
+    # INCREASE_COPPER_WEIGHT, whose docstring names +5V_RAIL as the case it was
+    # written for, could not fire on +5V_RAIL or on anything else.
+    fallback = _actions_off_the_tracks()
+    if fallback:
+        return fallback
+    _log(
+        f"No action this advisor can size reaches the target on '{net_name}': "
+        "widening the tracks, stitching the vias and thickening the pours each "
+        "reach too little of the drop."
+    )
+    return []
