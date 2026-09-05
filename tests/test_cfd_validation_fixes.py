@@ -261,6 +261,25 @@ class UnderResolvedMeshesAreReported(unittest.TestCase):
         self.assertEqual(len(findings), 1)
         self.assertEqual(findings[0].severity, FindingSeverity.HIGH)
 
+    def test_the_finding_does_not_deny_the_surface_film_the_solver_has(self):
+        """The claim that outlived the code, asserted on rather than assumed.
+
+        This finding told readers the solver had "no surface film coefficient"
+        for four commits after solid-air faces got one, in a shipped report,
+        about the solver's own physics. Nothing caught it because the tests
+        above check the rule id and the severity and never read the sentence.
+        """
+        adapted = self._adapt(10)
+        text = " ".join(
+            f.description for f in adapted.findings if f.rule_id == "CFD-004"
+        ) + " " + " ".join(adapted.limitations)
+
+        self.assertNotIn("no surface film", text)
+        # And it must still say why the number is unusable, which is now the
+        # transport from the air to the wall rather than the interface.
+        self.assertIn("surface film", text)
+        self.assertIn("enclosure wall", text)
+
     def test_the_reference_board_resolution_is_flagged(self):
         # p02_alimentation meshes to 24 x 20 x 10. An earlier threshold warned
         # only below 10, so exactly 10 slipped through silently -- and 10 cells

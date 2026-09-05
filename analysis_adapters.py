@@ -792,26 +792,33 @@ def adapt_cfd_result(mesh: Any, domain_result: Any) -> AnalysisResult:
         # Solid temperature deserves its own warning, because it is the number
         # a reader acts on and it fails harder than the velocity does.
         #
-        # This solver moves heat out of a component only by cell-to-cell
-        # conduction and advection; it has no surface film coefficient, so the
-        # convective boundary layer has to be resolved by the mesh. It cannot
-        # be at millimetre cells. On the reference board that put the hottest
-        # solid at 339 C against 72.6 C from the 3D thermal analysis of the same
-        # board at the same power -- a factor of 6.6 in rise -- and the two
-        # numbers appeared in the same report with nothing saying they
-        # disagreed.
+        # This text said the solver had no surface film coefficient, which was
+        # true when it was written and stopped being true when solid-air faces
+        # got one. It went on saying it for four commits, in a shipped report,
+        # about the solver's own physics -- because no test asserted on the
+        # wording, only on the rule id. The film is real: a solid-air face is
+        # conduction through the solid half-cell in series with natural, forced
+        # and radiation correlations. What is still unresolved is the step
+        # after it -- carrying that heat from the air beside the component to
+        # the enclosure wall through a buoyant plume at centimetres per second,
+        # which millimetre cells cannot do. That is A1 in
+        # docs/plan-ameliorations.md, and it is why the number is still not
+        # usable even though the interface is now modelled.
         solid_c = float(getattr(domain_result, "maximum_solid_temperature_c", 0.0))
         air_c = float(getattr(domain_result, "maximum_air_temperature_c", 0.0))
         if solid_c > air_c > 0.0:
             findings.append(_finding(
                 "CFD-004", 1, "THERMAL", FindingSeverity.HIGH,
                 "Enclosure CFD solid temperatures are not usable at this mesh size",
-                f"The hottest solid reads {solid_c:.1f} C against {air_c:.1f} C for the "
-                "air. This solver carries heat off a solid by cell-to-cell "
-                "conduction and advection only, with no surface film "
-                "coefficient, so the boundary layer must be resolved by the "
-                "mesh -- which millimetre cells cannot do. The figure reflects "
-                "the cell size, not the design.",
+                f"The hottest solid reads {solid_c:.1f} C against {air_c:.1f} C "
+                f"for the air, {solid_c - air_c:.1f} C apart. Solid-air faces do "
+                "carry a surface film, so the component's own interface is "
+                "modelled; what a millimetre mesh cannot resolve is the buoyant "
+                "plume that has to carry the heat onward from that air to the "
+                "enclosure wall. Heat accumulates in the air instead of leaving "
+                "it, and the closer the air comes to the solid the less "
+                "temperature difference the film has left to work against. The "
+                "figure reflects the cell size, not the design.",
                 "Take component temperatures from the 3D thermal analysis, "
                 "which applies a convective correlation and radiation at every "
                 "exposed face. Use this run for the flow field.",
@@ -858,11 +865,13 @@ def adapt_cfd_result(mesh: Any, domain_result: Any) -> AnalysisResult:
             "Momentum discretisation validated against laminar duct flow to 0.4% at 20 cells "
             "across the channel; at 6 cells it produced no boundary layer at all. "
             "See docs/validation-cfd.md.",
-            "Solid temperatures assume the convective boundary layer is resolved by the "
-            "mesh: there is no surface film coefficient, so heat leaves a component only "
-            "by conduction and advection between cells. The 3D thermal analysis applies a "
-            "Rayleigh correlation and radiation at each exposed face and is the source to "
-            "use for component temperatures.",
+            "Solid temperatures are limited by air-to-wall transport, not by the "
+            "component interface: a solid-air face is conduction through the solid "
+            "half-cell in series with a surface film (natural, forced and radiation "
+            "correlations), but a millimetre mesh cannot resolve the buoyant plume "
+            "that carries the heat from the air onward to the enclosure wall. The 3D "
+            "thermal analysis applies a Rayleigh correlation and radiation at each "
+            "exposed face and is the source to use for component temperatures.",
             "Sealed enclosure: no flow crosses a boundary, so mass balance is "
             "not applicable rather than perfect."
             if not mass_applicable else

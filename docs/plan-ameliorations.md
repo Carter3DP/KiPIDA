@@ -100,6 +100,27 @@ board. The second is a model, not a resolution, and must be labelled as one.
 Until this closes, CFD-004 stands and component temperatures come from the
 thermal analysis.
 
+The reference board now supplies a measurement this item never had, from an
+ordinary campaign run rather than an uncommitted reproduction case: solid
+225.1 C against air 189.5 C, **35.6 C apart**. That gap is the item stated as a
+number. The film is working and has almost nothing left to work against,
+because the air it dumps into cannot shed the heat onward. Any candidate fix
+should be graded on that difference and not on the solid temperature alone --
+a fix that lowers both by the same amount has changed nothing.
+
+CFD-004's own text had gone stale in the meantime, and shipped that way. It
+told the reader the solver "carries heat off a solid by cell-to-cell
+conduction and advection only, with no surface film coefficient" -- true when
+written, false from the commit that added the film, and still being printed
+four commits later in a report a user acts on. The same sentence sat a second
+time in the result's `limitations`. Both are corrected to name air-to-wall
+transport as the limit, which is what this item actually is.
+
+Why it survived: `tests/test_cfd_validation_fixes.py` asserted the finding's
+rule id and severity and never read its sentence. A finding is output; text
+that makes a physical claim needs asserting on like any other output. There is
+now a test that fails if the wording denies the film.
+
 *Step one is not either candidate.* Those three temperatures are recorded in
 this file and nowhere else: no case in `validation/cfd_benchmarks.py` produces
 them, `docs/validation-cfd.md` does not mention them, and nothing in the
@@ -332,6 +353,15 @@ completion, failure or timeout line, on every run. Whether the remote solve
 succeeds is currently unknowable from the log. Also `probe()` reports the
 usage text as a version string, which is cosmetic but reads as a malfunction.
 
+Both halves reproduce, unchanged, in the campaign of 2026-09-06 00:20:43.
+`Uploading the explicit Palace project directory to jb@AiHub...` at 00:19:18,
+then nothing; the EMC domain closed ten seconds later at WARN having said
+neither that the solve finished nor that it did not. And the probe line reads
+`Palace server ready: Usage: palace [OPTIONS] CONFIG_FILE`. Ten seconds is
+also too short for a remote solve, so the likeliest reading is that the upload
+returns and nothing waits on it -- but that is a hypothesis, and the reason it
+is only a hypothesis is the missing line.
+
 ## B. Structural — the same defect keeps recurring
 
 **B1. Sweep for duplicated defaults.**
@@ -393,6 +423,14 @@ Still open, and known rather than assumed:
 * The advisor runs once per batch in the campaign's DC adapter and again when
   the DC tab publishes. Correct but wasteful; it is not measured, because
   measuring it needs the reference board.
+
+  It is measured now, and it is bigger than the advisor. A campaign runs the
+  **whole seven-rail DC solve three times**: once for the DC domain (21.3 s),
+  once inside THERMAL for the electro-thermal coupling, and once inside CFD
+  for the copper-loss heat sources. Same board, same rails, same numbers --
+  `+5V_RAIL` reports `Drop 0.0077 V` and 2091 CG iterations in all three. That
+  is about 21 s of a 3 min 51 s campaign, and the campaign already holds the
+  DC outcome the other two could read.
 * `application/schematic_controller.py` -- and through it the whole `rules/`
   package -- is now the only shipped code nothing imports.
   `tests/test_campaign_wiring.py` has the reachability guard
@@ -405,6 +443,23 @@ Still open, and known rather than assumed:
 The batch and dialog tests run only when invoked directly, because
 `test_plotter` installs a `wx` stub during discovery. That is real coverage
 that disappears in CI. Fixing the stub is preferable to weakening the tests.
+
+**B5. A finding's text is output, and nothing asserts on it.**
+CFD-004 told users the enclosure solver had "no surface film coefficient" for
+four commits after it acquired one -- a false statement about the solver's own
+physics, in a report, in the sentence explaining why a number should not be
+trusted. It survived because the tests around it check the rule id and the
+severity and never read the sentence, so the claim and the code that made it
+true were free to drift apart. The same sentence had a second copy in the
+result's `limitations`, which is the B1 shape again in prose.
+
+This is a class, not an incident. Every adapter in `analysis_adapters.py`
+builds descriptions that make physical claims -- what a solver models, what it
+excludes, what a correlation covers -- and a claim in a description decays
+exactly like a duplicated default, except that nothing fails when it does. The
+sweep is the same shape as B1's: for each rule that explains a *mechanism*,
+one assertion pinning the mechanism it names. A5's probe line is the cheap end
+of the same problem, printing a usage string where a version belongs.
 
 **B4. The build fingerprint cannot see stale bytecode.**
 It hashes sources on disk. Module provenance was added for the shadowing case;

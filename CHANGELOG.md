@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Fixed the enclosure CFD's CFD-004 finding, and the matching limitation,
+  stating that the solver has no surface film coefficient. Solid-air faces have
+  carried one since the film was added; what still limits solid temperatures is
+  air-to-wall transport, which is what both now say.
 - Fixed the DC advisor's `WIDEN_TRACK` action narrowing copper: the what-if
   applied the proposed width to every segment on the layer, so on a layer with
   a mix of widths -- the normal case -- segments already wider were reduced to
