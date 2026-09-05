@@ -196,12 +196,43 @@ clearance hole defeated exactly that guard: a pad whose zone connection is
 current can reach. `tests/test_mesh_hybrid_zone_nodes.py` covers it, and all
 four of its cases fail on the old mesher.
 
-Not yet confirmed on the reference board, because that needs a session on the
-machine that has it. The prediction to check is exact and falsifiable:
-`validation/mesh_connectivity.py <board> +3V3_MAIN` should now report 2
-connected components instead of 902, 0 isolated single nodes instead of 900,
-and the **same branch count** as before. A changed branch count would mean the
-fix removed copper, not phantoms.
+Confirmed on the reference board, on all seven configured rails rather than
+only the one the prediction named. At a 0.1 mm step:
+
+| rail | nodes before | after | isolated before | components before -> after | branches |
+| --- | --- | --- | --- | --- | --- |
+| VBUS_PD | 15,602 | 14,414 | 1,188 | 1,194 -> 6 | 28,083 |
+| VBUS_PD_SW | 35,301 | 24,458 | 10,843 | 10,845 -> 2 | 47,761 |
+| +5V_U4 | 30,869 | 30,710 | 159 | 163 -> 4 | 60,407 |
+| +5V_RAIL | 180,373 | 116,560 | 63,813 | 63,825 -> 12 | 228,386 |
+| +3V3_MAIN | 7,313 | 6,413 | 900 | 901 -> 1 | 12,466 |
+| +3V3AO | 75,827 | 41,701 | 34,126 | 34,131 -> 5 | 81,006 |
+| +3V3AON | 8,972 | 8,062 | 910 | 913 -> 3 | 15,538 |
+
+The branch count is the same on both sides of every row, isolated nodes reach
+zero everywhere, and nodes-removed equals isolated-before *exactly* in all
+seven. The deletion was of phantoms and of nothing else.
+
+Two corrections to what was written above. The count was 901, not 902: 901
+reproduces at the commit that recorded 902, so the number was mis-transcribed
+rather than since changed, and the "2 components afterwards" prediction
+inherited the slip -- there is one. And +3V3_MAIN turned out to be the
+*smallest* case on this board, not a representative one: +5V_RAIL carried
+63,813 phantoms, 35 % of its mesh, and +3V3AO 34,126, 45 % of its.
+
+The larger correction is to the ranking. A4 sits under "an analysis currently
+reports something untrue", and on this board it does not. Every rail's solved
+drop is identical on both sides to six decimal places -- 6.558404 mV on
++5V_RAIL, 1.497185 mV on +3V3_MAIN -- as are the source-node count, every load
+coordinate, every real component's size, and the reachable/stranded verdict of
+every load. The barrel-into-unreachable-copper hazard is real and all four
+cases of `tests/test_mesh_hybrid_zone_nodes.py` fail without the fix, but it
+did not fire here: an extra barrel is a branch, and the branch counts are
+equal. Nor is the payoff speed -- 186.2 s to 181.5 s for the seven rails,
+2.5 %, because meshing and not node count dominates. What the fix bought on
+this board is that the hazard is gone, not that an answer moved. Ranked
+against its measured effect it belongs in section B, with the other defects
+that had not yet reached a user.
 
 **A5. Palace goes silent after the upload.**
 The log ends at "Uploading the explicit Palace project directory" with no
