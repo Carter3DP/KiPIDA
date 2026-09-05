@@ -373,11 +373,16 @@ class OrchestratorIsReachable(unittest.TestCase):
 
     def _production_modules(self):
         for base, directories, files in os.walk(_root):
+            # Every dotted directory is skipped rather than named, because the
+            # named list cannot keep up: .claude/worktrees holds checkouts of
+            # other branches, and parsing one of those made this guard report
+            # on code that is not this commit's -- including a half-written
+            # file that does not parse at all.
             directories[:] = [
                 name for name in directories
-                if name not in {"tests", "validation", "__pycache__", ".git",
-                                "docs", "locales", "resources", "examples",
-                                ".runtime", ".venv"}
+                if not name.startswith(".")
+                and name not in {"tests", "validation", "__pycache__",
+                                 "docs", "locales", "resources", "examples"}
             ]
             for name in files:
                 if name.endswith(".py"):
