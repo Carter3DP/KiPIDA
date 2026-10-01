@@ -162,6 +162,8 @@ def _drill_snapshot(item):
     size = _value(drill, "size", drill)
     diameter = _value(size, "diameter", _value(drill, "diameter"))
     if diameter is not None:
+        if _value(diameter, "x") is not None:
+            return _point(diameter)
         value = float(diameter)
         return DCPointSnapshot(value, value)
     x = _value(size, "x")
@@ -199,7 +201,7 @@ def capture_dc_board(board) -> DCBoardSnapshot:
                 net=DCNetSnapshot(_net_name(pad)),
                 pad_type=_integer_if_possible(_value(pad, "pad_type")),
                 type=str(_value(pad, "type", "") or ""),
-                drill_size=_point(drill) if drill is not None else None,
+                drill_size=_drill_snapshot(pad),
                 layers=_layers(pad_layers),
             ))
         footprints.append(DCFootprintSnapshot(reference, tuple(pad_snapshots)))
